@@ -1,0 +1,127 @@
+#/********************************************************************************/#
+#/*     Objective : Time Frame Alingment Input File                                #                           */                           */
+#/*                                                                              */#
+#/*     Prepared By : Rajendra Mehta                                               #
+#*/     date        :15/04/16                                                    */#  
+#/********************************************************************************/#
+rm(list=(ls()))
+
+#library(RGtk2)
+#options(guiToolkit="RGtk2")
+#library(gWidgetsRGtk2)
+
+browse.file1 <- gfilebrowse("SELECT CMBDB FILE",container = ga,quote=F)
+browse.file2 <- gfilebrowse("SELECT P_FACTOR FILE",container = ga,quote=F)
+browse.file3 <- gfilebrowse("SELECT FINALMRG4 FILE",container = ga,quote=F)
+#browse.file4 <- gfilebrowse("SELECT FINALMRG4 FILE",container = ga,quote=F)
+browse.file5 <- gfilebrowse("SELECT PNO FILE",container = ga,quote=F)
+browse.file6 <- gfilebrowse("SELECT OUTPUT FOLDER PATH",container = ga,quote=F,type="selectdir")
+###################################################################################
+TFA<-function(h,...){
+  
+  LAYER_ID<-as.numeric(unlist(strsplit(Layer_ID,",")))
+  ENTER_PNO<-noquote(ENTER_PNO)
+  #PNO_End<-noquote(PNO_End)
+  
+  library(ff)
+  library(ffbase)
+  library(foreign)
+  library(plyr)
+  library(data.table)
+  library(sqldf)
+  #Reading CMBDB file from path
+  CMBDB<-read.dbf(file=CMBDB)
+  
+  #Reading P_Factor file from path
+  P_Factor<-read.dbf(file=P_Factor)
+  
+  #Reading FINALMRG4 file from path
+  FINALMRG4_1<-read.dbf(file=SALES)
+  
+  #Reading FINALMRG4 file from path
+  SALES_2<-FINALMRG4_1[c("OUTLET","CAT","P_CODE","V4SALES","PRICE")]
+  SALES_2$PNO<-ENTER_PNO
+  SALES_2$SALES<-SALES_2$V4SALES*SALES_2$PRICE
+  SALES_2_1<-SALES_2[c("PNO","OUTLET","CAT","P_CODE","SALES")]
+  SALES_3<-sqldf("SELECT OUTLET,PNO,SALES,CAT,SUM(SALES) AS SALES_SUM FROM SALES_2_1 GROUP BY OUTLET,PNO")
+  SALES_3$SALES_SUM<-as.numeric(SALES_3$SALES_SUM)
+
+  #Reading PNO file from path
+  PNO_File_1<-read.csv(file=PNO_File)
+  
+  #Selecting from CMBDB,P_Factor and SALES
+  CMBDB_1<-CMBDB[c("OUTLET","PNO","VISDATE","TYPE","REGION")]
+  CMBDB_2<-CMBDB_1[CMBDB_1$PNO ==ENTER_PNO,]
+  
+  #Selecting P_Factor file with require Layer_ID and PNO
+  P_Factor_1<-P_Factor[c("OUTLET","PNO","Z_FACTOR","X_FACTOR","Y_FACTOR","LAYER_ID")]
+  P_Factor_2<-P_Factor_1[which(P_Factor_1$LAYER_ID == c(LAYER_ID)),]
+  P_Factor_3<-P_Factor_2[P_Factor_2$PNO ==ENTER_PNO,]
+  
+  #Merging All Files
+  Input_File<-merge(x=CMBDB_2,y=P_Factor_3,by.x=c("OUTLET","PNO"),by.y=c("OUTLET","PNO"),all.x = TRUE,trace=T)
+  Input_File_1<-merge(x=Input_File,y=PNO_File_1,by.x=c("PNO"),by.y=c("PNO"),all.x = TRUE,trace=T)
+  Input_File_2<-merge(x=Input_File_1,y=SALES_3,by.x=c("OUTLET","PNO"),by.y=c("OUTLET","PNO"),all.x = TRUE,trace=T)
+  Input_File_2$DATE<-as.Date(Input_File_2$DATE, format = "%m/%d/%Y")
+  Input_File_2$DAYS = difftime(Input_File_2$VISDATE, Input_File_2$DATE, units = c("days"))
+  Input_File_2$DAYS<-Input_File_2$DAYS
+  Input_File_2$SIMDATE<-Input_File_2$VISDATE
+  
+  
+  #Removing all othe files
+  #rm(PNO_File_1,CMBDB_2,P_Factor_2,P_Factor,P_Factor_1,CMBDB,CMBDB_1,SALES_1,SALES_2,SALES_3)
+  
+  #Removing Date is equal to blank
+  Input_File_3<-Input_File_2[which(!is.na(Input_File_2$X_FACTOR)),]
+  
+  #Selecting Monthly and Bi-Monthly
+  if (Index==1){
+    Input_File_3$DAYS_DIV<-Input_File_3$DAYS/30.5
+  }else{
+    Input_File_3$DAYS_DIV<-Input_File_3$DAYS/61
+  }
+  
+  #Adding FINALMRG4_1 OUTLET_Value @ P_Code Level
+  FINALMRG4_2<-FINALMRG4_1
+  FINALMRG4_2_1<-sqldf("SELECT OUTLET,count(P_CODE) AS SKU_COUNT FROM FINALMRG4_2 GROUP BY OUTLET")
+  Input_File_3_1<-merge(x=Input_File_3,y=FINALMRG4_2_1,by.x=c("OUTLET"),by.y=c("OUTLET"),all.x = TRUE,trace=T)
+  
+  Input_File_4<-Input_File_3_1[c("PERIOD","PNO","OUTLET","VISDATE","SIMDATE","DATE","DAYS","TYPE","REGION","SALES_SUM","Z_FACTOR","X_FACTOR","Y_FACTOR","DAYS_DIV","LAYER_ID","SKU_COUNT")]
+  #Input_File_4$SALES<-Input_File_4$SALES_SUM
+  Input_File_4$VALUE_Z<-Input_File_4$Z_FACTOR*Input_File_4$SALES
+  Input_File_4$VAL_D_Z<-Input_File_4$DAYS_DIV*Input_File_4$VALUE_Z
+  Input_File_4$VALUE_X<-Input_File_4$X_FACTOR*Input_File_4$SALES
+  Input_File_4$VAL_D_X<-Input_File_4$DAYS_DIV*Input_File_4$VALUE_X
+  Input_File_4$WDAYS<-Input_File_4$DAYS
+  Input_File_4$WDAYS_Z<-Input_File_4$Z_FACTOR*Input_File_4$DAYS
+  Input_File_4$WDAYS_X<-Input_File_4$X_FACTOR*Input_File_4$DAYS
+  #Converting to Numeric
+  Input_File_4$VAL_D_Z<-as.numeric(Input_File_4$VAL_D_Z)
+  Input_File_4$VAL_D_X<-as.numeric(Input_File_4$VAL_D_X)
+  
+  #Calculating the summary for All PNO Values
+  Input_File_4_1<-Input_File_4
+  Input_File_4_1_1<-sqldf("SELECT PNO,LAYER_ID,(sum(VAL_D_Z)/sum(VALUE_Z)*100) AS Sales_within_the_period_Z,(sum(VAL_D_X)/sum(VALUE_X)*100) as Sales_within_the_period_X,sum(WDAYS_Z)/sum(Z_FACTOR) as Average_weighted_day FROM Input_File_4_1 GROUP BY PNO,LAYER_ID")
+  Input_File_4_1_2<-cbind(Audit=c('Total'),Input_File_4_1_1)
+  
+  Input_File_4_2<-Input_File_4[Input_File_4$TYPE %in% c('OMI','OPH','OLA','OME','OSM','ORS','OBH','OJS',	'OTC','OBB'),]
+  Input_File_4_2_1<-sqldf("SELECT PNO,LAYER_ID,(sum(VAL_D_Z)/sum(VALUE_Z)*100) AS Sales_within_the_period_Z,(sum(VAL_D_X)/sum(VALUE_X)*100) as Sales_within_the_period_X,sum(WDAYS_Z)/sum(Z_FACTOR) as Average_weighted_day FROM Input_File_4_2 GROUP BY PNO,LAYER_ID")
+  Input_File_4_2_2<-cbind(Audit=c('Manual'),Input_File_4_2_1)
+  
+  Input_File_4_3<-Input_File_4[Input_File_4$TYPE %in% c('HYP','PAS','BAL','BAM','BND','COA','CAR','DNB','DAW','EUR','FRM','FRI','OAS','OAM','PAM','RAY','SAD','SRT','TAD','UNI','NCS','NCP','NCH','ZAH'),]
+  Input_File_4_3_1<-sqldf("SELECT PNO,LAYER_ID,(sum(VAL_D_Z)/sum(VALUE_Z)*100) AS Sales_within_the_period_Z,(sum(VAL_D_X)/sum(VALUE_X)*100) as Sales_within_the_period_X,sum(WDAYS_Z)/sum(Z_FACTOR) as Average_weighted_day FROM Input_File_4_3 GROUP BY PNO,LAYER_ID")
+  Input_File_4_3_2<-cbind(Audit=c('Scanning'),Input_File_4_3_1)
+  
+  Input_File_4_4<-rbind(Input_File_4_1_2,Input_File_4_2_2,Input_File_4_3_2)
+  
+  split_out <- split(Input_File_4_4, Input_File_4_4$PNO)
+  for (i in unique(as.character(unique(Input_File_4_4$PNO))))
+  {
+    Input_File_4_5<-Input_File_4_4[which(Input_File_4_4$PNO==i),]
+    filename = paste0(OUTPUT_File,"\\",i, ".csv",sep="")
+    write.csv(Input_File_4_5,filename,row.names = FALSE)
+  }
+  write.csv(Input_File_4,file=paste0(OUTPUT_File,"\\TFA_Total",".csv"),row.names = FALSE)  
+  write.csv(Input_File_4_4,file=paste0(OUTPUT_File,"\\","FINAL_FILE",".csv"),row.names=FALSE)
+  dispose(w)}
+button10<-gbutton("RUN",cont=gj,handler=TFA)
